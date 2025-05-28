@@ -2,3 +2,4 @@ ssd/
 mnt/
 *.pyc
 __pycache__/
+nfs/
