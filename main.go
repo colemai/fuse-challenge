@@ -137,7 +137,7 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 }
 
 func main() {
-	mountpoint := "./mnt"
+	mountpoint := "./mnt/all-projects"
 
 	if err := os.MkdirAll(mountpoint, 0755); err != nil {
 		log.Fatal(err)

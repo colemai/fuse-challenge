@@ -30,6 +30,6 @@ python3 init_fs_environment.py
 go run main.go
 
 # In another terminal, see the results:
-ls ./mnt/project-1
-cat ./mnt/project-1/common-lib.py
+ls ./mnt/all-projects
+cat ./mnt/all-projects/common-lib.py
 

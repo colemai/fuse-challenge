@@ -25,7 +25,7 @@ for dir_path, files in base_dirs.items():
             f.write(sample_content[file_name])
 
 # Create mount point
-os.makedirs("/mnt", exist_ok=True)
+os.makedirs("./mnt/all-projects", exist_ok=True)
 
 print(" /mnt ready for FUSE mount")
 print("✅ Directory structure and test files created.")
