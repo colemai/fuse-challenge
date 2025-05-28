@@ -31,5 +31,6 @@ go run main.go
 
 # In another terminal, see the results:
 ls ./mnt/all-projects
-cat ./mnt/all-projects/common-lib.py
+cat ./mnt/all-projects/project-1/common-lib.py   # expect 500ms delay
+cat ./mnt/all-projects/project-2/common-lib.py   # no 500ms delay
 
