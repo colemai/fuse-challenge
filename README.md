@@ -34,14 +34,14 @@ ls ./mnt/all-projects
 cat ./mnt/all-projects/project-1/common-lib.py   # expect 500ms delay
 cat ./mnt/all-projects/project-2/common-lib.py   # no 500ms delay
 
-# Extra credit
-cd ./mnt/all-projects/project-1 && python3 main.py 
+# Extra credit python script
+cd ./mnt/all-projects/project-1 && python3 main.py
 cd ../../../
+
+# Extra credit LRU, make a dozen files and there'll only be ten
 for i in {1..12}; do cp nfs/project-1/common-lib.py nfs/project-1/file-$i.py; done
 for i in {1..12}; do cat ./mnt/all-projects/project-1/file-$i.py > /dev/null; done
+ls ssd | wc -l # count files
 ls ssd/
 
-# Intransigent zombie state fuse cleaner
-cd ~ && umount -l ./mnt/all-projects || true && fuser -km ./mnt/all-projects || true && rm -rf ./mnt/all-projects && mkdir -p ./mnt/all-projects
-
-
+```
