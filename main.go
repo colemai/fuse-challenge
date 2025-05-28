@@ -40,6 +40,7 @@ func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	entries, err := os.ReadDir(d.realPath)
 	if err != nil {
+		log.Printf("❌ Failed to read directory %s: %v", d.realPath, err)
 		return nil, err
 	}
 	var dirents []fuse.Dirent
@@ -62,6 +63,7 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	full := filepath.Join(d.realPath, name)
 	fi, err := os.Stat(full)
 	if err != nil {
+		log.Printf("❌ Lookup failed for %s: %v", full, err)
 		return nil, fuse.ENOENT
 	}
 	if fi.IsDir() {
@@ -81,25 +83,25 @@ var _ fs.HandleReader = (*File)(nil)
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
 
-	// Try SSD first
 	if info, err := os.Stat(ssdPath); err == nil {
 		a.Mode = 0444
 		a.Size = uint64(info.Size())
 		return nil
+	} else {
+		log.Printf("⚠️  SSD stat miss for %s: %v", ssdPath, err)
 	}
 
-	// SSD miss — try original NFS path
 	nfsPath := filepath.Join(nfsDir, f.virtualPath)
 	if info, err := os.Stat(nfsPath); err == nil {
 		a.Mode = 0444
 		a.Size = uint64(info.Size())
 		return nil
+	} else {
+		log.Printf("❌ NFS stat failed for %s: %v", nfsPath, err)
 	}
 
-	// Neither exist — return error
 	return fuse.ENOENT
 }
-
 
 func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
 	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
@@ -111,9 +113,12 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 		nfsPath := filepath.Join(nfsDir, f.virtualPath)
 		input, err := os.ReadFile(nfsPath)
 		if err != nil {
+			log.Printf("❌ Failed to read from NFS: %s: %v", nfsPath, err)
 			return err
 		}
+
 		if err := os.WriteFile(ssdPath, input, 0644); err != nil {
+			log.Printf("❌ Failed to write to SSD: %s: %v", ssdPath, err)
 			return err
 		}
 		log.Printf("✅ Copied %s to SSD cache", f.virtualPath)
@@ -123,6 +128,7 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 
 	file, err := os.Open(ssdPath)
 	if err != nil {
+		log.Printf("❌ Failed to open SSD file %s: %v", ssdPath, err)
 		return err
 	}
 	defer file.Close()
@@ -130,6 +136,7 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 	buf := make([]byte, req.Size)
 	n, err := file.ReadAt(buf, req.Offset)
 	if err != nil && err.Error() != "EOF" {
+		log.Printf("❌ Failed to read from SSD file %s: %v", ssdPath, err)
 		return err
 	}
 	resp.Data = buf[:n]
@@ -140,19 +147,18 @@ func main() {
 	mountpoint := "./mnt/all-projects"
 
 	if err := os.MkdirAll(mountpoint, 0755); err != nil {
-		log.Fatal(err)
+		log.Fatalf("❌ Failed to create mountpoint: %v", err)
 	}
 	if err := os.MkdirAll(ssdDir, 0755); err != nil {
-		log.Fatal(err)
+		log.Fatalf("❌ Failed to create SSD cache dir: %v", err)
 	}
 
 	c, err := fuse.Mount(mountpoint, fuse.ReadOnly())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("❌ Failed to mount FUSE: %v", err)
 	}
 	defer c.Close()
 
-	// Graceful shutdown on SIGINT / SIGTERM
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
@@ -168,6 +174,6 @@ func main() {
 	log.Printf("✅ FUSE filesystem mounted at %s", mountpoint)
 
 	if err := fs.Serve(c, &FS{}); err != nil {
-		log.Fatal(err)
+		log.Fatalf("❌ Serve error: %v", err)
 	}
 }
