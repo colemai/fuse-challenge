@@ -4,7 +4,10 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 )
@@ -113,6 +116,21 @@ func main() {
 		log.Fatal(err)
 	}
 	defer c.Close()
+
+	// Handle graceful shutdown
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		log.Println("📦 Caught interrupt signal. Unmounting...")
+		if err := fuse.Unmount(mountpoint); err != nil {
+			log.Printf("⚠️  Unmount failed: %v", err)
+		}
+		os.Exit(0)
+	}()
+
+	log.Printf("✅ FUSE filesystem mounted at %s", mountpoint)
 
 	err = fs.Serve(c, &FS{})
 	if err != nil {
