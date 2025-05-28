@@ -1,0 +1,5 @@
+ssd/
+mountpoint/
+mnt/
+*.pyc
+__pycache__/
