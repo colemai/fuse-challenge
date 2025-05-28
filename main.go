@@ -16,6 +16,7 @@ import (
 var (
 	nfsDir = "./nfs"
 	ssdDir = "./ssd"
+	cache  = NewLRUCache(10) // max 10 cached files
 )
 
 type FS struct{}
@@ -121,8 +122,10 @@ func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadR
 			log.Printf("❌ Failed to write to SSD: %s: %v", ssdPath, err)
 			return err
 		}
+		cache.Touch(filepath.Base(f.virtualPath))
 		log.Printf("✅ Copied %s to SSD cache", f.virtualPath)
 	} else {
+		cache.Touch(filepath.Base(f.virtualPath))
 		log.Printf("⚡ Cache hit: %s", f.virtualPath)
 	}
 
