@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -14,6 +15,7 @@ import (
 
 var (
 	nfsDir = "./nfs"
+	ssdDir = "./ssd"
 )
 
 type FS struct{}
@@ -65,28 +67,61 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	if fi.IsDir() {
 		return &Dir{realPath: full}, nil
 	}
-	return &File{realPath: full}, nil
+	relPath, _ := filepath.Rel(nfsDir, full)
+	return &File{virtualPath: relPath}, nil
 }
 
 type File struct {
-	realPath string
+	virtualPath string
 }
 
 var _ fs.Node = (*File)(nil)
 var _ fs.HandleReader = (*File)(nil)
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
-	info, err := os.Stat(f.realPath)
-	if err != nil {
-		return err
+	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
+
+	// Try SSD first
+	if info, err := os.Stat(ssdPath); err == nil {
+		a.Mode = 0444
+		a.Size = uint64(info.Size())
+		return nil
 	}
-	a.Mode = 0444
-	a.Size = uint64(info.Size())
-	return nil
+
+	// SSD miss — try original NFS path
+	nfsPath := filepath.Join(nfsDir, f.virtualPath)
+	if info, err := os.Stat(nfsPath); err == nil {
+		a.Mode = 0444
+		a.Size = uint64(info.Size())
+		return nil
+	}
+
+	// Neither exist — return error
+	return fuse.ENOENT
 }
 
+
 func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	file, err := os.Open(f.realPath)
+	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
+
+	if _, err := os.Stat(ssdPath); os.IsNotExist(err) {
+		log.Printf("📥 Cache miss: %s → reading from NFS with delay...", f.virtualPath)
+		time.Sleep(500 * time.Millisecond)
+
+		nfsPath := filepath.Join(nfsDir, f.virtualPath)
+		input, err := os.ReadFile(nfsPath)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(ssdPath, input, 0644); err != nil {
+			return err
+		}
+		log.Printf("✅ Copied %s to SSD cache", f.virtualPath)
+	} else {
+		log.Printf("⚡ Cache hit: %s", f.virtualPath)
+	}
+
+	file, err := os.Open(ssdPath)
 	if err != nil {
 		return err
 	}
@@ -107,33 +142,32 @@ func main() {
 	if err := os.MkdirAll(mountpoint, 0755); err != nil {
 		log.Fatal(err)
 	}
+	if err := os.MkdirAll(ssdDir, 0755); err != nil {
+		log.Fatal(err)
+	}
 
-	c, err := fuse.Mount(
-		mountpoint,
-		fuse.ReadOnly(),
-	)
+	c, err := fuse.Mount(mountpoint, fuse.ReadOnly())
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 
-	// Handle graceful shutdown
+	// Graceful shutdown on SIGINT / SIGTERM
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigs
-		log.Println("📦 Caught interrupt signal. Unmounting...")
+		log.Println("📦 Caught signal — unmounting...")
 		if err := fuse.Unmount(mountpoint); err != nil {
-			log.Printf("⚠️  Unmount failed: %v", err)
+			log.Printf("⚠️  Failed to unmount: %v", err)
 		}
 		os.Exit(0)
 	}()
 
 	log.Printf("✅ FUSE filesystem mounted at %s", mountpoint)
 
-	err = fs.Serve(c, &FS{})
-	if err != nil {
+	if err := fs.Serve(c, &FS{}); err != nil {
 		log.Fatal(err)
 	}
 }
