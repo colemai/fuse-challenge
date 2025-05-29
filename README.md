@@ -1,4 +1,4 @@
-# 🚀 FUSE Challenge – NFS-Backed Read-Through Filesystem
+# 🚀 FUSE Challenge – Virtual FS, Mirror your NFS with speed
 
 [![Go](https://img.shields.io/badge/Go-1.20+-blue)](https://golang.org)  
 [![FUSE](https://img.shields.io/badge/FUSE-v3-green)](https://github.com/libfuse/libfuse)  
@@ -63,3 +63,27 @@ ls -lh ssd/ # Only the most recent files should remain in cache
 du -sh ssd/
 
 ```
+
+
+<b>Design Decisions:</b>
+<ul>
+<li>I initially chose to use Python, despite lower performance than the alternative languages, due to familiarity and speed of prototyping. Couldn’t make fuse lib play nice with python, despite trying specific python envs, docker, codespaces so switched to Go, my second most familiar language on the list, with a more proven Fuse lib.</li>
+<li>The challenge specified a protected dir (/mnt/) which resulted in some headaches in github codespace, permission denied for making /mnt/all-projects/. I toyed around with it for a bit but without quick resolution I made the judgement call that it was unlikely to be a dealbreaker to switch from the specified /mnt/all-projects to ./mnt/all-projects.</li>
+</ul>
+
+<b>Further improvements:</b>
+<ul>
+<li>Tests. If it were not a limited project I would already have coverage</li>
+<li>Investigate and handle race condition potential incl:</li>
+  - Two identical files read at the same time <br>
+  - NFS file modified between hashing and copying
+<li>Handle cache staleness</li>
+<li>Handle write failures - log a loud warning, skip cache write, don’t error out</li>
+<li>Handle read failures, weird file types</li>
+<li>Handle potential problems with deep trees, symlink loops</li>
+<li>Clear orphaned cache on reboot</li>
+<li>Handle hash collisions if scale sufficient</li>
+<li>Could do per-project partitions</li>
+<li>Fuse seems inclined to zombie state mounts, handle this upon startup</li>
+<li>Performance optimization</li>
+</ul>
