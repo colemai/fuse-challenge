@@ -4,47 +4,59 @@ import (
 	"container/list"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type LRUCache struct {
-	capacity int
-	items    map[string]*list.Element
-	order    *list.List // most recent at front
+	maxFiles int
+	maxBytes int
+	curBytes int
+
+	items map[string]*list.Element
+	order *list.List
+	mu    sync.Mutex
 }
 
 type entry struct {
-	key string
+	hash string
+	size int
 }
 
-func NewLRUCache(cap int) *LRUCache {
+func NewLRUCache(maxFiles, maxBytes int) *LRUCache {
 	return &LRUCache{
-		capacity: cap,
+		maxFiles: maxFiles,
+		maxBytes: maxBytes,
 		items:    make(map[string]*list.Element),
 		order:    list.New(),
 	}
 }
 
-func (c *LRUCache) Touch(key string) {
-	// If already exists, move to front
-	if el, ok := c.items[key]; ok {
+func (c *LRUCache) Touch(hash string, size int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Already in cache → update recency
+	if el, ok := c.items[hash]; ok {
 		c.order.MoveToFront(el)
 		return
 	}
 
-	// Add new
-	el := c.order.PushFront(&entry{key})
-	c.items[key] = el
+	// New cache entry
+	e := &entry{hash: hash, size: size}
+	el := c.order.PushFront(e)
+	c.items[hash] = el
+	c.curBytes += size
 
-	// Evict if over capacity
-	if len(c.items) > c.capacity {
+	// Evict until under limits
+	for len(c.items) > c.maxFiles || c.curBytes > c.maxBytes {
 		last := c.order.Back()
-		if last != nil {
-			ent := last.Value.(*entry)
-			delete(c.items, ent.key)
-			c.order.Remove(last)
-
-			// Remove file from SSD
-			os.Remove(filepath.Join("ssd", ent.key))
+		if last == nil {
+			break
 		}
+		old := last.Value.(*entry)
+		delete(c.items, old.hash)
+		c.order.Remove(last)
+		c.curBytes -= old.size
+		os.Remove(filepath.Join("ssd", old.hash))
 	}
 }

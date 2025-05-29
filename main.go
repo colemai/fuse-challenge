@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -16,7 +19,7 @@ import (
 var (
 	nfsDir = "./nfs"
 	ssdDir = "./ssd"
-	cache  = NewLRUCache(10) // max 10 cached files
+	cache  = NewLRUCache(10, 100*1024) // 10 files or 100 KB
 )
 
 type FS struct{}
@@ -81,17 +84,23 @@ type File struct {
 var _ fs.Node = (*File)(nil)
 var _ fs.HandleReader = (*File)(nil)
 
-func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
-	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
-
-	if info, err := os.Stat(ssdPath); err == nil {
-		a.Mode = 0444
-		a.Size = uint64(info.Size())
-		return nil
-	} else {
-		log.Printf("⚠️  SSD stat miss for %s: %v", ssdPath, err)
+func hashFile(path string) (string, []byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", nil, err
 	}
+	defer f.Close()
 
+	h := sha256.New()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", nil, err
+	}
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil)), data, nil
+}
+
+func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	nfsPath := filepath.Join(nfsDir, f.virtualPath)
 	if info, err := os.Stat(nfsPath); err == nil {
 		a.Mode = 0444
@@ -100,33 +109,32 @@ func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
 	} else {
 		log.Printf("❌ NFS stat failed for %s: %v", nfsPath, err)
 	}
-
 	return fuse.ENOENT
 }
 
 func (f *File) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	ssdPath := filepath.Join(ssdDir, filepath.Base(f.virtualPath))
+	nfsPath := filepath.Join(nfsDir, f.virtualPath)
+
+	hash, content, err := hashFile(nfsPath)
+	if err != nil {
+		log.Printf("❌ Failed to hash NFS file: %s: %v", nfsPath, err)
+		return err
+	}
+	ssdPath := filepath.Join(ssdDir, hash)
 
 	if _, err := os.Stat(ssdPath); os.IsNotExist(err) {
-		log.Printf("📥 Cache miss: %s → reading from NFS with delay...", f.virtualPath)
+		log.Printf("📥 Cache miss: %s (hash: %s) → reading from NFS with delay...", f.virtualPath, hash)
 		time.Sleep(500 * time.Millisecond)
 
-		nfsPath := filepath.Join(nfsDir, f.virtualPath)
-		input, err := os.ReadFile(nfsPath)
-		if err != nil {
-			log.Printf("❌ Failed to read from NFS: %s: %v", nfsPath, err)
-			return err
-		}
-
-		if err := os.WriteFile(ssdPath, input, 0644); err != nil {
+		if err := os.WriteFile(ssdPath, content, 0644); err != nil {
 			log.Printf("❌ Failed to write to SSD: %s: %v", ssdPath, err)
 			return err
 		}
-		cache.Touch(filepath.Base(f.virtualPath))
-		log.Printf("✅ Copied %s to SSD cache", f.virtualPath)
+		cache.Touch(hash, len(content))
+		log.Printf("✅ Copied %s to SSD cache (hash: %s)", f.virtualPath, hash)
 	} else {
-		cache.Touch(filepath.Base(f.virtualPath))
-		log.Printf("⚡ Cache hit: %s", f.virtualPath)
+		cache.Touch(hash, len(content))
+		log.Printf("⚡ Cache hit: %s (hash: %s)", f.virtualPath, hash)
 	}
 
 	file, err := os.Open(ssdPath)

@@ -30,16 +30,17 @@ python3 init_fs_environment.py
 go run .
 
 # In another terminal, see the results:
-ls ./mnt/all-projects
 cat ./mnt/all-projects/project-1/common-lib.py   # expect 500ms delay
 cat ./mnt/all-projects/project-2/common-lib.py   # no 500ms delay
+ls ./mnt/all-projects
+tree ./mnt/
 
 # Extra credit python script
 cd ./mnt/all-projects/project-1 && python3 main.py
 cd ../../../
 
 # Extra credit LRU, make a dozen files and there'll only be ten
-for i in {1..12}; do cp nfs/project-1/common-lib.py nfs/project-1/file-$i.py; done
+for i in {1..12}; do echo "file $i" > nfs/project-1/file-$i.py; done
 for i in {1..12}; do cat ./mnt/all-projects/project-1/file-$i.py > /dev/null; done
 ls ssd | wc -l # count files
 ls ssd/
