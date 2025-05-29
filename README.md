@@ -1,48 +1,65 @@
 # 🚀 FUSE Challenge – NFS-Backed Read-Through Filesystem
 
-This project implements a **read-only FUSE-based virtual filesystem** that overlays a simulated `nfs/` storage backend with a readthrough `ssd/` cache.
+[![Go](https://img.shields.io/badge/Go-1.20+-blue)](https://golang.org)  
+[![FUSE](https://img.shields.io/badge/FUSE-v3-green)](https://github.com/libfuse/libfuse)  
+[![Cache](https://img.shields.io/badge/Cache-LRU--Hashed-lightgrey)](https://en.wikipedia.org/wiki/Cache_replacement_policies)
 
-Files are transparently fetched from the NFS directory with a simulated delay and cached to a shared SSD directory to improve subsequent access performance.
+A **read-only FUSE-based virtual filesystem** that overlays a simulated `nfs/` backend with a hashed, LRU-based `ssd/` cache, mounted at `./mnt/all-projects`.
 
 ---
 
+
 ## ✅ Features
 
-- Read-only FUSE mount at `./mnt`
-- Directory listing reflects structure of `nfs/`
-- Files are read through a cache:
-  - If present in `ssd/`, read instantly
-  - If not, read from `nfs/` **with a 500ms delay** and then cached
-- Shared cache across all projects
-- Clean unmount on exit
+📁 Mounts at ./mnt/all-projects
+
+🪞 Mirrors nfs/ directory structure
+
+⚡ Caching with content hash (SHA-256) for deduplication
+
+🧠 LRU cache eviction: Max 10 files or 100KB
+
+📥 Cache miss: read with 500ms delay and copy to ssd/
+
+📤 Cache hit: instant read from ssd/
+
+🚫 Read-only access (no writes allowed)
+
+👋 Clean shutdown with umount, via SIGINT (Ctrl+C)
 
 ---
 
 ## 🛠️ Setup & Usage
 
-### 1. Initialize the environment
-
 ```bash
 # Create the nfs and ssd simulating dirs
 python3 init_fs_environment.py
 
-# Run the beautiful, beautiful code
+# Run
 go run .
 
 # In another terminal, see the results:
 cat ./mnt/all-projects/project-1/common-lib.py   # expect 500ms delay
-cat ./mnt/all-projects/project-2/common-lib.py   # no 500ms delay
+cat ./mnt/all-projects/project-1/common-lib.py   # instant (cache hit)
+cat ./mnt/all-projects/project-2/common-lib.py   # instant (cache hit) as files are identical
 ls ./mnt/all-projects
 tree ./mnt/
 
-# Extra credit python script
+# Run a script through the mount
 cd ./mnt/all-projects/project-1 && python3 main.py
 cd ../../../
 
-# Extra credit LRU, make a dozen files and there'll only be ten
+# Cache eviction by file count, LRU, ten files
 for i in {1..12}; do echo "file $i" > nfs/project-1/file-$i.py; done
 for i in {1..12}; do cat ./mnt/all-projects/project-1/file-$i.py > /dev/null; done
 ls ssd | wc -l # count files
 ls ssd/
+
+# Cache eviction by size, LRU, 100KB
+mkdir -p nfs/project-evict-test
+for i in {1..12}; do base64 /dev/urandom | head -c 20480 > nfs/project-evict-test/file-$i.dat; done
+for i in {1..12}; do cat ./mnt/all-projects/project-evict-test/file-$i.dat > /dev/null; done
+ls -lh ssd/ # Only the most recent files should remain in cache
+du -sh ssd/
 
 ```
